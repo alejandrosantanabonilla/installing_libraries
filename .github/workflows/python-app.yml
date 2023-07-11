@@ -16,16 +16,13 @@ jobs:
     strategy:
       matrix:
         os: [ubuntu-latest, macos-latest]
+        backend:
+          - skbuild
+          - mesonpy
         python-version: [3.7, 3.8, 3.9, 3.10.12]
         mpi: [openmpi]
 
-
     steps:
-
-    - name: Configure hostname
-      run:  echo 127.0.0.1 `hostname` | sudo tee -a /etc/hosts > /dev/null
-      if:   runner.os == 'Linux' || runner.os == 'macOS'
-
     - name: Checkout
       uses: actions/checkout@v3
 
@@ -33,54 +30,61 @@ jobs:
       uses: mpi4py/setup-mpi@v1
       with:
         mpi: ${{ matrix.mpi }}
-      
-    - name: Setup Python (${{ matrix.py }})
+
+    - name: Setup Python (${{ github.event.inputs.py || 3 }})
       uses: actions/setup-python@v4
       with:
-        python-version: ${{ matrix.py }}
+        python-version: ${{ github.event.inputs.py || 3 }}
         cache: pip
         cache-dependency-path: |
           conf/requirements-build-cython.txt
-          conf/requirements-test.txt
+          conf/requirements-build-${{ matrix.backend }}.txt
 
     - name: Upgrade pip
       run:  python -m pip install -U pip
 
-    - name: Build package
-      run:  python -m pip wheel -vvv --wheel-dir=dist .
-    - name: Upload package artifacts
+    - name: Install Python packages (build)
+      run:  python -m pip install -U build
+
+    - name: Build sdist and wheel (${{ matrix.backend }})
+      run:  python -m build
+      env:
+        MPI4PY_BUILD_BACKEND: ${{ matrix.backend }}
+        MPI4PY_LOCAL_VERSION: ${{ matrix.mpi }}
+
+    - name: Upload wheel
       uses: actions/upload-artifact@v3
       with:
-        name: mpi4py-${{ matrix.os }}-${{ matrix.mpi }}
+        name: mpi4py-${{ matrix.backend }}-${{ matrix.os }}
         path: dist/mpi4py-*.whl
 
-    - name: Install package for testing
+    - name: Install wheel
       run:  python -m pip install mpi4py
               --verbose --no-index --find-links=dist
 
-    - name: Install Python packages (test)
-      run:  python -m pip install -U -r conf/requirements-test.txt
-      if:   runner.os == 'Linux' || !startsWith(matrix.py, 'pypy-')
+    - name: Test wheel after install (test_package)
+      run:  mpiexec -n 1 python test/main.py test_package
 
-    - name: Test mpi4py (np=1)
-      run:  mpiexec -n 1 python test/runtests.py -v
-    - name: Test mpi4py (np=2)
-      run:  mpiexec -n 2 python test/runtests.py -v -f -e spawn
+    - name: Test wheel after install (helloworld)
+      run:  mpiexec -n 2 python -m mpi4py.bench helloworld
 
-    - name: Test mpi4py.futures (np=1)
-      run:  mpiexec -n 1 python demo/futures/test_futures.py -v
-    - name: Test mpi4py.futures (np=2)
-      run:  mpiexec -n 2 python demo/futures/test_futures.py -v
+    - name: Uninstall wheel after testing
+      run:  python -m pip uninstall mpi4py
+              --verbose --yes
 
-    - name: Test mpi4py.run
-      run:  python demo/test-run/test_run.py -v
-      if:   matrix.mpi != 'msmpi'
-    - name: Test init-fini
-      run:  bash demo/init-fini/run.sh
-      if:   matrix.mpi != 'msmpi'
-    - name: Test check-mpiexec
-      run:  bash demo/check-mpiexec/run.sh
-      if:   matrix.mpi != 'msmpi'
+    - name: Install package with pip (${{ matrix.backend }})
+      run:  python -m pip install .
+              --verbose
+      env:
+        MPI4PY_BUILD_BACKEND: ${{ matrix.backend }}
+        MPI4PY_LOCAL_VERSION: ${{ matrix.mpi }}
+
+    - name: Test package after install (test_package)
+      run:  mpiexec -n 1 python test/main.py test_package
+
+    - name: Test package after install (helloworld)
+      run:  mpiexec -n 2 python -m mpi4py.bench helloworld
 
     - name: Uninstall package after testing
-      run:  python -m pip uninstall --yes mpi4py
+      run:  python -m pip uninstall mpi4py
+              --verbose --yes
