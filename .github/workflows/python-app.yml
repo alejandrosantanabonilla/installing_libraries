@@ -29,3 +29,6 @@ jobs:
           mpi: ${{ matrix.mpi }}
       - run: mpicc helloworld.c -o helloworld
       - run: mpiexec -n 2 ./helloworld
+      
+      - name: Install dependencies
+        run: python -m pip install --upgrade pip
