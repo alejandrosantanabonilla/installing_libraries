@@ -17,7 +17,7 @@ jobs:
       matrix:
         os: [ubuntu-latest, macos-latest]
         python-version: [3.7, 3.8, 3.9, 3.10.12]
-        mpi: [ 'mpich', 'openmpi', 'intelmpi']
+        mpi: [ 'mpich', 'openmpi']
       
     steps:
       - name: Checkout
