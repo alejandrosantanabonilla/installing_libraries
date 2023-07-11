@@ -28,3 +28,4 @@ jobs:
           mpi: ${{ matrix.mpi }}
       - run: mpicc helloworld.c -o helloworld
       - run: mpiexec -n 2 ./helloworld
+      - run: mpiexec -n 4 python -m mpi4py.futures multi_mpi_exe.py
