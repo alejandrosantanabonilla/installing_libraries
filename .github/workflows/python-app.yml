@@ -19,25 +19,68 @@ jobs:
         python-version: [3.7, 3.8, 3.9, 3.10.12]
         mpi: [openmpi]
 
+
     steps:
-    - uses: actions/checkout@v2
-    - name: Set up Python ${{ matrix.python-version }}
-      uses: actions/setup-python@v2
+
+    - name: Configure hostname
+      run:  echo 127.0.0.1 `hostname` | sudo tee -a /etc/hosts > /dev/null
+      if:   runner.os == 'Linux' || runner.os == 'macOS'
+
+    - name: Checkout
+      uses: actions/checkout@v3
+
+    - name: Setup MPI (${{ matrix.mpi }})
+      uses: mpi4py/setup-mpi@v1
       with:
-        python-version: ${{ matrix.python-version }}
-    - name: Install openmpi - Ubuntu
-      if: runner.os == 'Linux'
-      run: |
-        sudo apt-get install libopenmpi-dev openmpi-bin
-    - name: Install openmpi - OSX
-      if: runner.os == 'macOS'
-      run: |
-        brew install openmpi
-    - name: Install dependencies
-      run: |
-        python -m pip install --upgrade pip
-        python -m pip install mpi4py
-    - name: Test mpi4py
-      run: |
-          mpirun -np 4 --oversubscribe python -m mpi4py.futures multi_mpi_exe.py
-    
+        mpi: ${{ matrix.mpi }}
+      
+    - name: Setup Python (${{ matrix.py }})
+      uses: actions/setup-python@v4
+      with:
+        python-version: ${{ matrix.py }}
+        cache: pip
+        cache-dependency-path: |
+          conf/requirements-build-cython.txt
+          conf/requirements-test.txt
+
+    - name: Upgrade pip
+      run:  python -m pip install -U pip
+
+    - name: Build package
+      run:  python -m pip wheel -vvv --wheel-dir=dist .
+    - name: Upload package artifacts
+      uses: actions/upload-artifact@v3
+      with:
+        name: mpi4py-${{ matrix.os }}-${{ matrix.mpi }}
+        path: dist/mpi4py-*.whl
+
+    - name: Install package for testing
+      run:  python -m pip install mpi4py
+              --verbose --no-index --find-links=dist
+
+    - name: Install Python packages (test)
+      run:  python -m pip install -U -r conf/requirements-test.txt
+      if:   runner.os == 'Linux' || !startsWith(matrix.py, 'pypy-')
+
+    - name: Test mpi4py (np=1)
+      run:  mpiexec -n 1 python test/runtests.py -v
+    - name: Test mpi4py (np=2)
+      run:  mpiexec -n 2 python test/runtests.py -v -f -e spawn
+
+    - name: Test mpi4py.futures (np=1)
+      run:  mpiexec -n 1 python demo/futures/test_futures.py -v
+    - name: Test mpi4py.futures (np=2)
+      run:  mpiexec -n 2 python demo/futures/test_futures.py -v
+
+    - name: Test mpi4py.run
+      run:  python demo/test-run/test_run.py -v
+      if:   matrix.mpi != 'msmpi'
+    - name: Test init-fini
+      run:  bash demo/init-fini/run.sh
+      if:   matrix.mpi != 'msmpi'
+    - name: Test check-mpiexec
+      run:  bash demo/check-mpiexec/run.sh
+      if:   matrix.mpi != 'msmpi'
+
+    - name: Uninstall package after testing
+      run:  python -m pip uninstall --yes mpi4py
